@@ -116,6 +116,11 @@ public sealed class Warpzone
     /// <summary>The target name linking this zone to its partner (QC .target / .targetname).</summary>
     public string TargetName = "", Target = "";
 
+    /// <summary>[T55] The player who shot this portal, when it is a Porto-weapon portal (null for a map
+    /// warpzone). Lets <see cref="WarpzoneManager.ClearPortoPortals"/> tear down a player's pair on death /
+    /// disconnect / on firing a replacement (QC .realowner + Portal_ClearAll_PortalsOnly).</summary>
+    public Entity? PortoOwner;
+
     public bool Linked => Transform.Valid;
 }
 
@@ -321,35 +326,76 @@ public sealed class WarpzoneManager
         wz.Trigger = t;
     }
 
-    // Porto portals awaiting their partner (keyed by owner + the shot's portal id).
-    private readonly Dictionary<(Entity?, int), Warpzone> _pendingPorto = new();
+    // [T55] Porto-weapon portals, tracked per owner (QC player.portal_in / player.portal_out). A player has at
+    // most one IN and one OUT portal; firing a new end replaces that end and re-links the pair, and death /
+    // disconnect tears the pair down (Portal_ClearAll_PortalsOnly). Keyed by owner (NOT by the per-shot portal
+    // id) so the two-shot mode — where the in-portal and out-portal are separate projectiles with different ids
+    // (gren.portal_id = time) — pairs correctly, exactly like the QC per-player portal_in/portal_out fields.
+    private sealed class PortoPair { public Warpzone? In; public Warpzone? Out; }
+    private readonly Dictionary<Entity, PortoPair> _porto = new();
     private static readonly Vector3 PortoMins = new(-48, -48, -48);
     private static readonly Vector3 PortoMaxs = new(48, 48, 48);
 
     /// <summary>
-    /// QC Portal_SpawnIn/OutPortalAtTrace: realise a Porto-weapon portal as a warpzone. The plane forward is the
-    /// wall's surface normal (so an entity entering emerges out of the partner). The in-portal is held pending
-    /// until its matching out-portal lands; then the pair is linked two-way (you can walk through either side).
-    /// Wire <c>Porto.PortalSpawner</c> to this on the host.
+    /// QC <c>Portal_SpawnIn/OutPortalAtTrace</c>: realise a Porto-weapon portal as a warpzone. The plane forward
+    /// is the wall's surface normal (so an entity entering emerges out of the partner). Pairing is per OWNER: a
+    /// new IN portal replaces the owner's previous IN (QC portal_in), a new OUT replaces the previous OUT, and
+    /// whenever both ends exist they are linked two-way (walk/shoot through either side). The teleport itself —
+    /// origin/velocity/angle rotation — is the shared warpzone <see cref="Teleport"/> (T45). Wire
+    /// <c>Porto.PortalSpawner</c> to this on the host.
     /// </summary>
     public void PlacePortoPortal(Vector3 origin, Vector3 surfaceNormal, bool isInPortal, int portalId, Entity? owner)
     {
-        Vector3 angles = QMath.FixedVecToAngles(surfaceNormal); // forward = the wall normal
-        var wz = new Warpzone { InOrigin = origin, InAngles = angles, TargetName = $"porto_{portalId}_{(isInPortal ? "in" : "out")}" };
+        Vector3 angles = QMath.FixedVecToAngles(surfaceNormal); // forward = the wall normal (into the room)
+        var wz = new Warpzone
+        {
+            InOrigin = origin,
+            InAngles = angles,
+            TargetName = $"porto_{portalId}_{(isInPortal ? "in" : "out")}",
+            PortoOwner = owner,
+        };
         SpawnTriggerFor(wz, PortoMins, PortoMaxs);
         Add(wz);
 
-        var key = (owner, portalId);
+        if (owner is null) return; // ownerless portal (defensive): a lone, unlinked zone
+
+        if (!_porto.TryGetValue(owner, out PortoPair? pair)) { pair = new PortoPair(); _porto[owner] = pair; }
+
         if (isInPortal)
         {
-            _pendingPorto[key] = wz;
-            return;
+            if (pair.In is not null) RemoveZone(pair.In); // QC: a new in-portal replaces the old portal_in
+            pair.In = wz;
         }
-        if (_pendingPorto.TryGetValue(key, out Warpzone? inZone))
+        else
         {
-            LinkPair(inZone, wz); // two-way Porto portal
-            _pendingPorto.Remove(key);
+            if (pair.Out is not null) RemoveZone(pair.Out);
+            pair.Out = wz;
         }
+
+        if (pair.In is not null && pair.Out is not null)
+            LinkPair(pair.In, pair.Out); // both ends present → connect them two-way
+    }
+
+    /// <summary>
+    /// [T55] QC <c>Portal_ClearAll_PortalsOnly(owner)</c> / the porto death cleanup: destroy a player's Porto
+    /// portal pair (both ends + their trigger volumes). Called when the owner dies, disconnects, or fires a
+    /// replacement pair. No-op for a player with no active portals.
+    /// </summary>
+    public void ClearPortoPortals(Entity owner)
+    {
+        if (!_porto.TryGetValue(owner, out PortoPair? pair)) return;
+        if (pair.In is not null) RemoveZone(pair.In);
+        if (pair.Out is not null) RemoveZone(pair.Out);
+        _porto.Remove(owner);
+    }
+
+    /// <summary>Unregister a warpzone and free its trigger volume (used when a Porto portal is replaced/cleared).</summary>
+    private void RemoveZone(Warpzone wz)
+    {
+        _zones.Remove(wz);
+        if (wz.Trigger is { } t && Api.Services is not null) Api.Entities.Remove(t);
+        wz.Trigger = null;
+        wz.Transform = default; // drop the link (Linked => Transform.Valid becomes false)
     }
 
     /// <summary>Link two warpzones into a two-way portal (each transforms toward the other's IN plane).</summary>

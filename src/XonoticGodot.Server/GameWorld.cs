@@ -1713,6 +1713,10 @@ public sealed class GameWorld
         if (p.RespawnTimeMax <= 0f)
             RespawnTiming.Calculate(p, Clients.Players, Teamplay.IsTeamGame);
 
+        // [T55] QC: a player's Porto portals close when they die ("the portals will close either after the
+        // player who shot them dies or after some time period"). Tear the pair down on the death edge.
+        Warpzones.ClearPortoPortals(p);
+
         // QC RESPAWN_DENY: respawning is blocked entirely; the player stays dead (e.g. eliminated in a round).
         if ((p.RespawnFlags & RespawnFlag.Deny) != 0)
         {
