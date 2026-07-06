@@ -91,7 +91,7 @@ public sealed class ConsoleCommand
 /// feeds it console/rcon/client input via <see cref="Execute"/>. Output is collected on the
 /// <see cref="CommandContext"/> for the host to relay.
 /// </summary>
-public sealed class Commands
+public sealed partial class Commands
 {
     private readonly Dictionary<string, ConsoleCommand> _commands = new(StringComparer.OrdinalIgnoreCase);
     private readonly GameWorld _world;
@@ -439,6 +439,8 @@ public sealed class Commands
 
     private void RegisterBuiltins()
     {
+        RegisterAdminDebug(); // [T70] admin/debug/utility verbs (partial: Commands.AdminDebug.cs)
+
         // ---- cvar reflection (QC common/command/generic.qc set/seta/toggle + cvar) ----
         Register("set", "set <cvar> <value> — set a console variable", CmdSet);
         Register("seta", "seta <cvar> <value> — set + archive a console variable", CmdSet);

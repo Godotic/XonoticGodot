@@ -24,7 +24,7 @@ namespace XonoticGodot.Engine.Console;
 /// the Godot overlay and the engine/host actions (quit/connect/map/vid_restart) are wired around it by the
 /// client (<c>Game.Console.ConsoleOverlay</c> / <c>Shell</c>).</para>
 /// </summary>
-public sealed class ConsoleCommands
+public sealed partial class ConsoleCommands
 {
     private readonly ConfigInterpreter _interp;
     private readonly CvarService _cvars;
@@ -66,6 +66,8 @@ public sealed class ConsoleCommands
 
     private void Register()
     {
+        RegisterClientDebug(); // [T70] client debug verbs (partial: ConsoleCommands.Debug.cs)
+
         _interp.RegisterCommand("echo", a => _print(JoinTail(a, 1)));
         _interp.RegisterCommand("clear", _ => _clear?.Invoke());
 
