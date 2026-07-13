@@ -157,6 +157,7 @@ public class DeterminismTests
     {
         0x30D85D31A8B2C3EFUL, // x64 / Windows CRT  (original dev-machine pin)
         0xB23337E9D523E7E6UL, // x64 / Linux glibc  (GitHub ubuntu-latest)
+        0xC1C9EEE2DA9D3297UL, // x64 / macOS Apple libm (confirmed: UlpPerturbation passes, revert-tested as pre-existing)
     };
 
     [Fact]
